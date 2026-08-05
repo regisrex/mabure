@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "kill_enabled": true,
+  "dry_run": false,
+  "poll_interval_ms": 100,
+  "heartbeat_interval_s": 10,
+  "unreachable_after_missed_heartbeats": 2,
+  "matched_flags": ["-e", "--eval", "--eval=", "-e="],
+  "kill_children": true,
+  "concurrent_scan_threshold": 8,
+  "git_guard_enabled": true,
+  "git_revert_on_detect": true,
+  "git_scan_max_file_size_kb": 2048,
+  "git_poll_interval_ms": 20
+}

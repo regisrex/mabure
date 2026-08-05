@@ -1,0 +1,99 @@
+name: Build & Release
+
+# Manual "Run workflow" button (defaults to v1 — just click Run for the
+# first release) or push a version tag (v1.2.3-style) for subsequent ones.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v1)"
+        required: true
+        default: "v1"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # needed to create the GitHub Release
+
+jobs:
+  build-and-release:
+    # build.sh already cross-compiles BOTH arm64 and x86_64 slices on a
+    # single host (via `swiftc -target ...` + `lipo`, no separate per-arch
+    # runner needed — verified locally) and combines them into genuine
+    # universal2 binaries, so one Apple Silicon runner builds both
+    # architectures. Two separate runners would just double the cost for
+    # an identical result.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine release tag
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Show toolchain
+        run: |
+          xcrun --sdk macosx --show-sdk-path
+          swiftc --version
+
+      - name: Build universal2 (arm64 + x86_64)
+        run: ./build.sh
+
+      - name: Verify both architecture slices are present
+        run: lipo -info build/mabured build/Mabure
+
+      - name: Ad-hoc code-sign
+        run: |
+          codesign --force --sign - --identifier com.mabure.agent build/Mabure.app
+          codesign --force --sign - --identifier com.mabure.daemon build/mabured
+          codesign -dv build/Mabure.app
+          codesign -dv build/mabured
+
+      - name: Package release bundle
+        id: package
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          STAGING="mabure-${TAG}"
+          mkdir -p "$STAGING/build"
+          cp -R build/mabured build/Mabure.app "$STAGING/build/"
+          touch "$STAGING/build/.prebuilt"  # tells install.sh to skip building from source
+          cp -R Resources Config "$STAGING/"
+          cp install.sh uninstall.sh README.md "$STAGING/"
+          chmod +x "$STAGING/install.sh" "$STAGING/uninstall.sh"
+          ZIP="${STAGING}-macos-universal2.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$STAGING" "$ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          ZIP="${{ steps.package.outputs.zip }}"
+          NOTES="Prebuilt universal2 (Apple Silicon + Intel) build — no Xcode/Swift needed on the target Mac.
+
+          ## Install
+          \`\`\`sh
+          unzip ${ZIP}
+          cd mabure-${TAG}
+          sudo ./install.sh
+          \`\`\`
+
+          Ad-hoc code-signed (not notarized) — this is a personal-use security tool, not a distributed commercial app. See README.md for configuration, pausing, uninstalling, and known limitations.
+          "
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" "$ZIP" \
+              --repo "${{ github.repository }}" \
+              --title "Mabure $TAG" \
+              --notes "$NOTES"
+          fi

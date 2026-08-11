@@ -20,6 +20,21 @@ struct MatchedRule {
     let snippet: String    // short excerpt for the log, never the full body
 }
 
+/// Shared by MaliciousCodeHeuristics (general behavioral rules) and
+/// PolinRiderMarkers.swift (campaign-specific literal IOCs) — one place
+/// for "does this regex fire, and if so, package it as a MatchedRule".
+enum RegexRuleMatcher {
+    static func firstMatch(
+        _ name: String, _ pattern: String, in text: String, filePath: String,
+        severity: Int, options: NSRegularExpression.Options = []
+    ) -> MatchedRule? {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let m = re.firstMatch(in: text, range: range), let r = Range(m.range, in: text) else { return nil }
+        return MatchedRule(name: name, filePath: filePath, severity: severity, snippet: String(text[r].prefix(120)))
+    }
+}
+
 enum MaliciousCodeHeuristics {
     /// Files whose content is expected to be dense/high-entropy for
     /// legitimate reasons — excluded from entropy/obfuscation rules (but
@@ -34,13 +49,20 @@ enum MaliciousCodeHeuristics {
     }
 
     static func evaluate(_ file: GitDiffFile, maxScanBytes: Int) -> [MatchedRule] {
-        guard !file.isBinary else { return [] }
+        guard !file.isBinary else { return [] }  // see BinaryMasqueradeScanner.swift for the binary case
+
+        // Campaign-specific literal IOCs (PolinRiderMarkers) are cheap
+        // substring/regex checks with essentially zero legitimate-code
+        // false positives, so — unlike the general contentRules below —
+        // they run even on low-signal paths (lockfiles, minified bundles)
+        // and aren't gated by isLowSignalPath. Still respects the size
+        // gate for pathologically large files.
         guard file.byteSize <= maxScanBytes else {
             // Oversized file: still run the cheap path-based rules, skip
             // the O(n) content regexes (performance guard).
-            return manifestAndCIRules(file)
+            return manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file)
         }
-        var rules = manifestAndCIRules(file)
+        var rules = manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file)
         if !isLowSignalPath(file.pathB) {
             rules += contentRules(file)
         }
@@ -84,11 +106,8 @@ enum MaliciousCodeHeuristics {
         var out: [MatchedRule] = []
 
         func hit(_ name: String, _ pattern: String, severity: Int, options: NSRegularExpression.Options = []) {
-            guard let re = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-            let range = NSRange(text.startIndex..., in: text)
-            if let m = re.firstMatch(in: text, range: range), let r = Range(m.range, in: text) {
-                out.append(MatchedRule(name: name, filePath: file.pathB, severity: severity,
-                                        snippet: String(text[r].prefix(120))))
+            if let rule = RegexRuleMatcher.firstMatch(name, pattern, in: text, filePath: file.pathB, severity: severity, options: options) {
+                out.append(rule)
             }
         }
 

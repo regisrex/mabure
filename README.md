@@ -49,6 +49,26 @@ list to exempt specific repos entirely. `Tools/verify-gitguard-live.sh` runs a s
 end-to-end check (benign pull, malicious pull, postinstall-script pull) against the real
 installed daemon.
 
+### Campaign-specific markers (PolinRider / TasksJacker)
+
+`Sources/mabured/PolinRiderMarkers.swift` adds a small set of near-zero-false-positive,
+literal indicators for the active DPRK PolinRider/TasksJacker supply-chain campaign
+(108+ malicious packages across npm/Packagist/Go/Chrome Web Store as of mid-2026 —
+[Socket.dev](https://socket.dev/blog/polinrider-north-korea-linked-supply-chain-campaign-expands),
+[OpenSourceMalware](https://opensourcemalware.com/blog/tasksjacker-blog-post)): specific
+packed-string fragments, `global['!']=`/`global['_V']=` injection keys, and a couple of
+leaked build-environment artifacts. These are point-in-time IOCs, not structural
+properties — expect this file to need periodic updates as the campaign evolves, unlike
+`MaliciousCodeHeuristics.swift`'s behavioral rules.
+
+`Sources/mabured/BinaryMasqueradeScanner.swift` closes a real gap the general content
+rules can't reach: PolinRider hides JS loaders inside files with binary-looking extensions
+(`.woff2`, `.wasm`, `.png`, ...), and git's own diff shows zero content for a true binary
+file. For files git flags as binary *and* whose extension is masquerade-prone, this fetches
+the actual blob and checks for loader-shaped text (`require(`, `child_process`, `atob(`, ...)
+where a real font/wasm/image's binary header should be — finding any of it at all is the
+signal, regardless of what else is in the file.
+
 No Apple EndpointSecurity framework is used (it requires a special entitlement Apple
 only grants to enrolled paid developer accounts). Detection is a tight poll loop
 instead — in practice 15–90ms from process start to kill, well under the ~1s target.

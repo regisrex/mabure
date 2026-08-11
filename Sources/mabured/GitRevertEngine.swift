@@ -54,6 +54,12 @@ enum GitRevertEngine {
         for file in diffResult.files {
             matched += MaliciousCodeHeuristics.evaluate(file, maxScanBytes: config.git_scan_max_file_size_kb * 1024)
         }
+        // Binary-masquerade check (fake fonts/wasm/images hiding a JS
+        // loader) needs its own git call per suspicious file, since a
+        // true-binary diff carries no added-lines text for the rules
+        // above to see in the first place.
+        matched += BinaryMasqueradeScanner.evaluate(files: diffResult.files, repoPath: op.repoPath, newSHA: newHead, uid: op.uid)
+
         let severity3 = matched.filter { $0.severity >= 3 }
         let severity2 = matched.filter { $0.severity == 2 }
         let shouldRevert = !severity3.isEmpty || severity2.count >= 2

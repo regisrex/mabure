@@ -110,5 +110,37 @@ do {
           MaliciousCodeHeuristics.evaluate(ciFile, maxScanBytes: 1_000_000).contains { $0.name == "ci_or_hook_file_change" })
 }
 
+print("== PolinRiderMarkers ==")
+do {
+    func fileWith(_ text: String, path: String = "x.js") -> GitDiffFile {
+        GitDiffFile(pathA: path, pathB: path, isNewFile: true, isBinary: false,
+                    addedLinesText: text, byteSize: text.utf8.count)
+    }
+
+    check("packed string v1 fires", PolinRiderMarkers.evaluate(fileWith("var x = 'rmcej%otb%';")).contains { $0.name == "polinrider_packed_string_v1" })
+    check("packed string v2 fires", PolinRiderMarkers.evaluate(fileWith("var x = 'Cot%3t=shtP';")).contains { $0.name == "polinrider_packed_string_v2" })
+    check("global['!']= fires", PolinRiderMarkers.evaluate(fileWith("global['!']=1;")).contains { $0.name == "polinrider_global_bang_key" })
+    check("global[\"_V\"]= fires", PolinRiderMarkers.evaluate(fileWith("global[\"_V\"] = '8-abc';")).contains { $0.name == "polinrider_global_v_key" })
+    check("global['r']=require fires (severity 2)",
+          PolinRiderMarkers.evaluate(fileWith("global['r']=require;")).contains { $0.name == "polinrider_global_require_module_stash" && $0.severity == 2 })
+    check("bink@DESKTOP artifact fires", PolinRiderMarkers.evaluate(fileWith("// bink@DESKTOP-N8JGD6T")).contains { $0.name == "polinrider_ssh_key_artifact" })
+    check("com.bablu.helper.plist artifact fires", PolinRiderMarkers.evaluate(fileWith("com.bablu.helper.plist")).contains { $0.name == "polinrider_macos_launchagent_artifact" })
+    check("_0x hex identifier shape fires (severity 2)",
+          PolinRiderMarkers.evaluate(fileWith("var _0x4f2a = 1;")).contains { $0.name == "obfuscator_hex_suffixed_identifier" && $0.severity == 2 })
+    check("_$_ hex identifier shape fires", PolinRiderMarkers.evaluate(fileWith("function _$_1e42(){}")).contains { $0.name == "obfuscator_hex_suffixed_identifier" })
+    check("ordinary JS flags nothing from PolinRiderMarkers",
+          PolinRiderMarkers.evaluate(fileWith("function add(a,b){return a+b;}")).isEmpty)
+}
+
+print("== BinaryMasqueradeScanner (pure content-check portion, no git/su needed) ==")
+do {
+    check("fake woff2 containing require( is flagged",
+          BinaryMasqueradeScanner.suspiciousContentRule(in: "\u{0}\u{0}\u{1}\u{0}require('child_process').exec('x')", filePath: "font.woff2", ext: "woff2") != nil)
+    check("real-looking binary header alone is NOT flagged",
+          BinaryMasqueradeScanner.suspiciousContentRule(in: "wOF2\u{0}\u{1}\u{0}\u{0}\u{0}binarydatabinarydata", filePath: "font.woff2", ext: "woff2") == nil)
+    check("fake png containing atob( is flagged",
+          BinaryMasqueradeScanner.suspiciousContentRule(in: "\u{89}PNG\u{0}\u{0}atob('ZXZpbA==')", filePath: "logo.png", ext: "png") != nil)
+}
+
 print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILURE(S)")
 exit(failures == 0 ? 0 : 1)

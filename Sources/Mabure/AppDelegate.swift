@@ -11,6 +11,11 @@
 import AppKit
 import UserNotifications
 
+private enum NotificationIdentifiers {
+    static let mabureEventCategory = "MABURE_EVENT"
+    static let reportBugAction = "REPORT_BUG"
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var controller: StatusItemController!
     private var tailer: LogTailer!
@@ -33,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
 
         UNUserNotificationCenter.current().delegate = self
+        registerNotificationCategories()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
             DispatchQueue.main.async {
                 self?.controller.notificationsDenied = !granted
@@ -76,7 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         controller.addEvent(event)
 
         guard !isBackfill, let display = IdentityFilter.present(event) else { return }
-        postNotification(for: display, isGitBlock: event.type == "git_block")
+        // Written unconditionally alongside every notification (whether or
+        // not the OS actually shows the banner — e.g. permission denied) —
+        // a durable local record, not just a transient UI element.
+        ReportWriter.write(event: event, display: display)
+        postNotification(for: display, event: event)
     }
 
     private func runWatchdog() {
@@ -121,13 +131,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func postNotification(for display: DisplayEvent, isGitBlock: Bool = false) {
+    /// The "Report Bug" action button shown on every Mabure notification —
+    /// registered once at launch, referenced by categoryIdentifier below.
+    private func registerNotificationCategories() {
+        let reportBug = UNNotificationAction(
+            identifier: NotificationIdentifiers.reportBugAction,
+            title: "Report Bug", options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: NotificationIdentifiers.mabureEventCategory,
+            actions: [reportBug], intentIdentifiers: [], options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
+    private func postNotification(for display: DisplayEvent, event: KillEvent) {
+        let isGitBlock = event.type == "git_block"
         let content = UNMutableNotificationContent()
         content.title = isGitBlock ? "Mabure reverted a suspicious git pull" : "Mabure killed a node -e process"
         content.body = display.title
         content.sound = .default
+        content.categoryIdentifier = NotificationIdentifiers.mabureEventCategory
+        // Only generic, non-identifying fields — this ends up in a PUBLIC
+        // GitHub issue body if the user taps "Report Bug" (see
+        // openBugReport below), so no repo paths, commands, or matched
+        // rule content ever gets stashed here.
+        content.userInfo = ["eventType": event.type, "eventID": event.event_id, "detectedTS": event.detected_ts]
         let request = UNNotificationRequest(identifier: display.id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
+    /// Opens a pre-filled "new issue" page on the public repo. Deliberately
+    /// generic — event type/time/id only, never file paths, commands, or
+    /// matched-rule content, since this repo is public and the user might
+    /// just hit submit without editing.
+    private func openBugReport(userInfo: [AnyHashable: Any]) {
+        let eventType = userInfo["eventType"] as? String ?? "unknown"
+        let eventID = userInfo["eventID"] as? String ?? "unknown"
+        let detectedTS = userInfo["detectedTS"] as? String ?? "unknown"
+        let body = """
+        **What happened / what seems wrong:**
+
+
+        **Event details** (no file paths, commands, or matched content included — add your own context above if useful):
+        - Type: \(eventType)
+        - Time: \(detectedTS)
+        - Event ID: \(eventID)
+        - macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        """
+        var components = URLComponents(string: "https://github.com/regisrex/mabure/issues/new")!
+        components.queryItems = [
+            URLQueryItem(name: "title", value: "Bug report: \(eventType) notification"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        if let url = components.url {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // Show the banner even though this is a background agent (there's no
@@ -138,5 +197,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+
+    // Fired when the user taps the "Report Bug" action on a notification.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == NotificationIdentifiers.reportBugAction {
+            openBugReport(userInfo: response.notification.request.content.userInfo)
+        }
+        completionHandler()
     }
 }

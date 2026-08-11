@@ -69,6 +69,17 @@ the actual blob and checks for loader-shaped text (`require(`, `child_process`, 
 where a real font/wasm/image's binary header should be — finding any of it at all is the
 signal, regardless of what else is in the file.
 
+`Sources/mabured/VSCodeTaskMarkers.swift` targets the **TasksJacker** vector (an evolution of
+the same DPRK cluster — [OpenSourceMalware](https://opensourcemalware.com/blog/tasksjacker-blog-post),
+[VS Code issue #309406](https://github.com/microsoft/vscode/issues/309406)): a
+`.vscode/tasks.json` entry with `"runOn": "folderOpen"` executes the instant a workspace is
+opened in VS Code, silently, before any code review. Path-gated to `.vscode/tasks.json`,
+`.vscode/settings.json`, and `*.code-workspace` — checks for `runOn: folderOpen`, a pull
+re-enabling `task.allowAutomaticTasks` (the exact setting Microsoft shipped to stop this),
+`node` pointed at a font/wasm-shaped path (the TasksJacker+fake-font combo), and known C2
+domains for this campaign (kept corroborating-only, since e.g. `vercel.app` alone is far too
+common to auto-revert on by itself).
+
 No Apple EndpointSecurity framework is used (it requires a special entitlement Apple
 only grants to enrolled paid developer accounts). Detection is a tight poll loop
 instead — in practice 15–90ms from process start to kill, well under the ~1s target.

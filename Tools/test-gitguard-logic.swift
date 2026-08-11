@@ -142,5 +142,32 @@ do {
           BinaryMasqueradeScanner.suspiciousContentRule(in: "\u{89}PNG\u{0}\u{0}atob('ZXZpbA==')", filePath: "logo.png", ext: "png") != nil)
 }
 
+print("== VSCodeTaskMarkers ==")
+do {
+    func taskFile(_ text: String, path: String = ".vscode/tasks.json") -> GitDiffFile {
+        GitDiffFile(pathA: path, pathB: path, isNewFile: true, isBinary: false,
+                    addedLinesText: text, byteSize: text.utf8.count)
+    }
+
+    check("runOn folderOpen fires", VSCodeTaskMarkers.evaluate(taskFile(#""runOptions": { "runOn": "folderOpen" }"#))
+        .contains { $0.name == "vscode_task_autorun_on_folder_open" })
+    check("allowAutomaticTasks:on fires (in settings.json)",
+          VSCodeTaskMarkers.evaluate(taskFile(#""task.allowAutomaticTasks": "on""#, path: ".vscode/settings.json"))
+            .contains { $0.name == "vscode_task_allow_automatic_tasks_enabled" })
+    check("node on .woff2 fires",
+          VSCodeTaskMarkers.evaluate(taskFile(#""command": "node", "args": ["./assets/fonts/icon.woff2"]"#))
+            .contains { $0.name == "vscode_task_node_on_nonjs_asset" })
+    check("known C2 domain fires (severity 2)",
+          VSCodeTaskMarkers.evaluate(taskFile(#""url": "https://api.trongrid.io/foo""#))
+            .contains { $0.name == "vscode_task_known_c2_domain" && $0.severity == 2 })
+    check("ordinary tasks.json (build task) flags nothing",
+          VSCodeTaskMarkers.evaluate(taskFile(#"{"label":"build","type":"shell","command":"npm run build"}"#)).isEmpty)
+    check("same suspicious content OUTSIDE .vscode/ is not evaluated (path-gated)",
+          VSCodeTaskMarkers.evaluate(taskFile(#""runOn": "folderOpen""#, path: "src/config.json")).isEmpty)
+    check(".code-workspace file is also covered",
+          VSCodeTaskMarkers.evaluate(taskFile(#""runOn": "folderOpen""#, path: "myproject.code-workspace"))
+            .contains { $0.name == "vscode_task_autorun_on_folder_open" })
+}
+
 print(failures == 0 ? "\nALL PASSED" : "\n\(failures) FAILURE(S)")
 exit(failures == 0 ? 0 : 1)

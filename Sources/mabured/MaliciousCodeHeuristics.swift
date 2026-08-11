@@ -60,9 +60,9 @@ enum MaliciousCodeHeuristics {
         guard file.byteSize <= maxScanBytes else {
             // Oversized file: still run the cheap path-based rules, skip
             // the O(n) content regexes (performance guard).
-            return manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file)
+            return manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file) + VSCodeTaskMarkers.evaluate(file)
         }
-        var rules = manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file)
+        var rules = manifestAndCIRules(file) + PolinRiderMarkers.evaluate(file) + VSCodeTaskMarkers.evaluate(file)
         if !isLowSignalPath(file.pathB) {
             rules += contentRules(file)
         }

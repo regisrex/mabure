@@ -174,6 +174,18 @@ that data for every user (root/same-user tooling needs it). A sufficiently motiv
 local user could still read the raw file directly; this is a documented, accepted gap
 (see Risks).
 
+**Per-user incident reports**: every time a notification fires (kill or GitGuard revert),
+a matching human-readable Markdown report is also saved to
+`~/Library/Application Support/Mabure/Reports/` — reuses exactly what the notification/
+dropdown already shows (no new privacy exposure), written even if OS notification
+permission is denied, and auto-pruned after 90 days.
+
+Every notification also has a **Report Bug** action button (long-press/click "Options" on
+the banner, or from Notification Center) that opens a pre-filled GitHub issue on
+[regisrex/mabure](https://github.com/regisrex/mabure/issues) — deliberately generic
+(event type/time/id only; this repo is public, so no file paths, commands, or matched
+content are ever auto-included).
+
 ## Verifying it works
 
 ```sh
